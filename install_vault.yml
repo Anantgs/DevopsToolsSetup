@@ -1,0 +1,124 @@
+---
+- name: Install HashiCorp Vault on AWS EC2 Linux
+  hosts: all
+  become: yes
+  tasks:
+    - name: Ensure apt-get is up to date (Debian-based systems)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == 'Debian'
+
+    - name: Ensure yum is up to date (RHEL-based systems)
+      yum:
+        name: "*"
+        state: latest
+      when: ansible_os_family == 'RedHat'
+
+    - name: Install necessary dependencies (Debian-based systems)
+      apt:
+        name:
+          - gnupg
+          - software-properties-common
+          - curl
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Install necessary dependencies (RHEL-based systems) excluding curl
+      yum:
+        name:
+          - yum-utils
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Download HashiCorp Vault (latest version)
+      get_url:
+        url: "https://releases.hashicorp.com/vault/1.12.0/vault_1.12.0_linux_amd64.zip"
+        dest: /tmp/vault.zip
+
+    - name: Unzip HashiCorp Vault
+      unarchive:
+        src: /tmp/vault.zip
+        dest: /usr/local/bin
+        remote_src: yes
+
+    - name: Set ownership and permissions for Vault binary
+      file:
+        path: /usr/local/bin/vault
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create Vault user and group
+      user:
+        name: vault
+        state: present
+        system: yes
+        shell: /sbin/nologin
+
+    - name: Create Vault configuration directory
+      file:
+        path: /etc/vault.d
+        state: directory
+        owner: vault
+        group: vault
+        mode: '0755'
+
+    - name: Create Vault data directory
+      file:
+        path: /var/lib/vault/data
+        state: directory
+        owner: vault
+        group: vault
+        mode: '0755'
+
+    - name: Create Vault configuration file
+      copy:
+        dest: /etc/vault.d/vault.hcl
+        content: |
+          storage "file" {
+            path = "/var/lib/vault/data"
+          }
+          listener "tcp" {
+            address     = "0.0.0.0:8200"
+            tls_disable = 1
+          }
+          ui = true
+
+    - name: Set ownership and permissions for Vault configuration file
+      file:
+        path: /etc/vault.d/vault.hcl
+        owner: vault
+        group: vault
+        mode: '0644'
+
+    - name: Create a systemd service file for Vault
+      copy:
+        dest: /etc/systemd/system/vault.service
+        content: |
+          [Unit]
+          Description=HashiCorp Vault - A tool for managing secrets
+          Documentation=https://www.vaultproject.io/docs/
+          After=network-online.target
+
+          [Service]
+          User=vault
+          Group=vault
+          ExecStart=/usr/local/bin/vault server -config=/etc/vault.d/vault.hcl
+          ExecReload=/bin/kill --signal HUP $MAINPID
+          KillSignal=SIGINT
+          Restart=on-failure
+          LimitNOFILE=8192
+          LimitMEMLOCK=infinity
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd to pick up new Vault service
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start Vault service
+      systemd:
+        name: vault
+        enabled: yes
+        state: started
