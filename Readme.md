@@ -1,0 +1,1 @@
+This is project to setup the devops tools using automation
