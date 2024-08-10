@@ -1,0 +1,117 @@
+- name: Set up SonarQube on AWS EC2 Linux
+  hosts: sonarqube
+  become: yes
+  vars:
+    sonar_version: "10.4.1.88267" # Update this to the latest version
+    sonar_install_dir: "/opt/sonarqube"
+    sonar_user: "sonar"
+    sonar_group: "sonar"
+
+  tasks:
+    - name: Update package index
+      yum:
+        name: '*'
+        state: latest
+
+    - name: Install required packages
+      yum:
+        name:
+          - unzip
+          - wget
+        state: present
+
+    - name: Create SonarQube group
+      group:
+        name: "{{ sonar_group }}"
+        state: present
+
+    - name: Create SonarQube user
+      user:
+        name: "{{ sonar_user }}"
+        group: "{{ sonar_group }}"
+        create_home: yes
+        state: present
+
+    - name: Download and Install OpenJDK 11
+      block:
+        - name: Download OpenJDK 11
+          get_url:
+            url: "https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.20%2B8/OpenJDK11U-jdk_x64_linux_hotspot_11.0.20_8.tar.gz"
+            dest: "/tmp/openjdk-11_linux-x64_bin.tar.gz"
+
+        - name: Extract OpenJDK 11
+          unarchive:
+            src: "/tmp/openjdk-11_linux-x64_bin.tar.gz"
+            dest: "/usr/local"
+            remote_src: yes
+
+        - name: Set JAVA_HOME and PATH
+          lineinfile:
+            path: /etc/profile.d/jdk11.sh
+            line: "{{ item }}"
+            create: yes
+          loop:
+            - "export JAVA_HOME=/usr/local/jdk-11"
+            - "export PATH=$JAVA_HOME/bin:$PATH"
+
+    - name: Create SonarQube installation directory
+      file:
+        path: "{{ sonar_install_dir }}"
+        state: directory
+        owner: "{{ sonar_user }}"
+        group: "{{ sonar_group }}"
+        mode: '0755'
+
+    - name: Download SonarQube
+      get_url:
+        url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonar_version }}.zip"
+        dest: "/tmp/sonarqube-{{ sonar_version }}.zip"
+
+    - name: Unzip SonarQube
+      unarchive:
+        src: "/tmp/sonarqube-{{ sonar_version }}.zip"
+        dest: "{{ sonar_install_dir }}"
+        remote_src: yes
+        owner: "{{ sonar_user }}"
+        group: "{{ sonar_group }}"
+
+    - name: Symlink SonarQube directory
+      file:
+        src: "{{ sonar_install_dir }}/sonarqube-{{ sonar_version }}"
+        dest: "{{ sonar_install_dir }}/current"
+        state: link
+
+    - name: Create SonarQube service file
+      copy:
+        dest: /etc/systemd/system/sonarqube.service
+        content: |
+          [Unit]
+          Description=SonarQube service
+          After=network.target
+
+          [Service]
+          Type=forking
+          User={{ sonar_user }}
+          Group={{ sonar_group }}
+          ExecStart={{ sonar_install_dir }}/current/bin/linux-x86-64/sonar.sh start
+          ExecStop={{ sonar_install_dir }}/current/bin/linux-x86-64/sonar.sh stop
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd to recognize SonarQube service
+      command: systemctl daemon-reload
+
+    - name: Start and enable SonarQube service
+      systemd:
+        name: sonarqube
+        state: started
+        enabled: yes
+
+    - name: Open firewall port 9000 (if using firewalld)
+      firewalld:
+        port: 9000/tcp
+        permanent: yes
+        state: enabled
+      ignore_errors: yes
