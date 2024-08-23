@@ -1,0 +1,37 @@
+---
+- name: Ensure Java is installed using YUM
+  hosts: localhost  # Replace with your target hosts or groups
+  become: yes       # Ensure the playbook runs with elevated privileges
+
+  tasks:
+    - name: Check if Java is already installed
+      shell: java -version
+      register: java_check
+      ignore_errors: yes
+
+    - name: Debug Java version if already installed
+      debug:
+        msg: "Java is already installed: {{ java_check.stdout }}"
+      when: java_check.rc == 0
+
+    - name: Install Java using YUM
+      yum:
+        name: java
+        state: present
+      when: java_check.rc != 0
+
+    - name: Verify Java installation
+      shell: java -version
+      register: java_install_check
+      ignore_errors: yes
+
+    - name: Debug Java version after installation
+      debug:
+        msg: "Java installation verification: {{ java_install_check.stdout }}"
+      when: java_install_check.rc == 0
+
+    - name: Print error if Java installation failed
+      debug:
+        msg: "Java installation failed or Java is not properly installed."
+      when: java_install_check.rc != 0
+
