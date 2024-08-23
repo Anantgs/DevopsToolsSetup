@@ -1,0 +1,160 @@
+---
+- name: Setup Nexus Repository Manager with OpenJDK 11 on AWS EC2 Linux
+  hosts: NEXUS
+  become: yes
+  vars:
+    nexus_version: "3.37.0-01"
+    nexus_home: "/opt/nexus"
+    nexus_data: "/opt/sonatype-work"
+    nexus_user: "nexus"
+    jdk_url: "https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.20%2B8/OpenJDK11U-jdk_x64_linux_hotspot_11.0.20_8.tar.gz"
+    nexus_url: "https://download.sonatype.com/nexus/3/nexus-{{ nexus_version }}-unix.tar.gz"
+    jdk_dir_name: "jdk-11.0.20+8"
+
+  tasks:
+    - name: Update the package list
+      yum:
+        name: "*"
+        state: latest
+
+    - name: Install necessary packages
+      yum:
+        name:
+          - wget
+          - tar
+        state: present
+
+    - name: Download OpenJDK 11
+      get_url:
+        url: "{{ jdk_url }}"
+        dest: "/tmp/openjdk-11_linux-x64_bin.tar.gz"
+
+    - name: Verify OpenJDK 11 tarball download
+      stat:
+        path: "/tmp/openjdk-11_linux-x64_bin.tar.gz"
+      register: jdk_tarball
+
+    - name: Fail if JDK tarball is not downloaded
+      fail:
+        msg: "OpenJDK 11 tarball not found."
+      when: not jdk_tarball.stat.exists
+
+    - name: Extract OpenJDK 11
+      unarchive:
+        src: "/tmp/openjdk-11_linux-x64_bin.tar.gz"
+        dest: "/usr/local"
+        remote_src: yes
+
+    - name: List contents of /usr/local
+      command: ls -l /usr/local
+      register: local_dir_contents
+
+    - name: Debug contents of /usr/local
+      debug:
+        msg: "{{ local_dir_contents.stdout }}"
+
+    - name: Check if JDK directory exists
+      stat:
+        path: "/usr/local/{{ jdk_dir_name }}"
+      register: jdk_dir
+
+    - name: Fail if JDK directory not found
+      fail:
+        msg: "JDK directory '/usr/local/{{ jdk_dir_name }}' not found."
+      when: not jdk_dir.stat.exists
+
+    - name: Set JAVA_HOME and PATH
+      lineinfile:
+        path: /etc/profile.d/jdk11.sh
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "export JAVA_HOME=/usr/local/{{ jdk_dir_name }}"
+        - "export PATH=$JAVA_HOME/bin:$PATH"
+
+    - name: Source /etc/profile.d/jdk11.sh
+      shell: source /etc/profile.d/jdk11.sh
+      args:
+        executable: /bin/bash
+
+    - name: Create nexus user
+      user:
+        name: "{{ nexus_user }}"
+        system: yes
+        shell: /bin/bash
+
+    - name: Create nexus home directory
+      file:
+        path: "{{ nexus_home }}"
+        state: directory
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_user }}"
+
+    - name: Create nexus data directory
+      file:
+        path: "{{ nexus_data }}"
+        state: directory
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_user }}"
+
+    - name: Download Nexus
+      get_url:
+        url: "{{ nexus_url }}"
+        dest: "/tmp/nexus-{{ nexus_version }}-unix.tar.gz"
+
+    - name: Extract Nexus
+      unarchive:
+        src: "/tmp/nexus-{{ nexus_version }}-unix.tar.gz"
+        dest: "{{ nexus_home }}"
+        copy: no
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_user }}"
+
+    - name: Create symbolic link for nexus
+      file:
+        src: "{{ nexus_home }}/nexus-{{ nexus_version }}"
+        dest: "{{ nexus_home }}/nexus"
+        state: link
+
+    - name: Update nexus permissions
+      command: chown -R {{ nexus_user }}:{{ nexus_user }} {{ nexus_home }}
+
+    - name: Update nexus.vmoptions file
+      lineinfile:
+        path: "{{ nexus_home }}/nexus/bin/nexus.vmoptions"
+        line: "-Dkaraf.data={{ nexus_data }}"
+        create: yes
+      become_user: "{{ nexus_user }}"
+
+    - name: Create systemd service file for Nexus
+      copy:
+        dest: /etc/systemd/system/nexus.service
+        content: |
+          [Unit]
+          Description=Nexus Repository Manager
+          After=network.target
+
+          [Service]
+          Type=forking
+          LimitNOFILE=65536
+          ExecStart={{ nexus_home }}/nexus/bin/nexus start
+          ExecStop={{ nexus_home }}/nexus/bin/nexus stop
+          User={{ nexus_user }}
+          Restart=on-abort
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable Nexus service
+      systemd:
+        name: nexus
+        enabled: yes
+
+    - name: Start Nexus service
+      systemd:
+        name: nexus
+        state: started
