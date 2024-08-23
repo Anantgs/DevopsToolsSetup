@@ -1,6 +1,6 @@
 ---
 - name: Install HashiCorp Vault on AWS EC2 Linux
-  hosts: all
+  hosts: localhost
   become: yes
   tasks:
     - name: Ensure apt-get is up to date (Debian-based systems)

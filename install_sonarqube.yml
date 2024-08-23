@@ -1,5 +1,5 @@
 - name: Set up SonarQube on AWS EC2 Linux
-  hosts: sonarqube
+  hosts: localhost
   become: yes
   vars:
     sonar_version: "10.4.1.88267" # Update this to the latest version
