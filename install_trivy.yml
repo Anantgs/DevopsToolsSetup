@@ -1,0 +1,32 @@
+---
+- name: Install and Run Trivy in Docker on AWS EC2 Linux
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Install Docker
+      yum:
+        name: docker
+        state: present
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Pull Trivy Docker image
+      docker_image:
+        name: aquasec/trivy
+        source: pull
+
+    - name: Run Trivy container to scan an image
+      docker_container:
+        name: trivy
+        image: aquasec/trivy
+        command: >
+          trivy image --format json --output /tmp/trivy-report.json nginx:latest
+        state: started
+        restart_policy: no
+        volumes:
+          - /tmp:/tmp
