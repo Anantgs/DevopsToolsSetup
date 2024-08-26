@@ -1,0 +1,33 @@
+---
+- name: Install Java (Amazon Corretto) on AWS EC2
+  hosts: localhost
+  become: yes
+
+  tasks:
+    - name: Import the Amazon Corretto RPM GPG key
+      rpm_key:
+        state: present
+        key: https://yum.corretto.aws/corretto.key
+
+    - name: Add Amazon Corretto yum repository
+      yum_repository:
+        name: corretto
+        description: Amazon Corretto
+        baseurl: https://yum.corretto.aws/latest/amazon-linux-2/x86_64/
+        gpgcheck: yes
+        enabled: yes
+
+    - name: Install Amazon Corretto 11
+      yum:
+        name: java-11-amazon-corretto-devel
+        state: present
+
+    - name: Verify Java installation
+      shell: java -version
+      register: java_install_check
+      ignore_errors: yes
+
+    - name: Debug Java version after installation
+      debug:
+        msg: "Java installation verification: {{ java_install_check.stdout }}"
+      when: java_install_check.rc == 0
