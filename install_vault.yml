@@ -1,104 +1,59 @@
 ---
-- name: Install HashiCorp Vault on AWS EC2 Linux
-  hosts: all
-  become: yes
+- name: Install and configure HashiCorp Vault
+  hosts: localhost  # Replace with your target hosts or groups
+  become: yes       # Ensure the playbook runs with elevated privileges
+
   tasks:
-    - name: Ensure apt-get is up to date (Debian-based systems)
-      apt:
-        update_cache: yes
-      when: ansible_os_family == 'Debian'
-
-    - name: Ensure yum is up to date (RHEL-based systems)
-      yum:
-        name: "*"
-        state: latest
-      when: ansible_os_family == 'RedHat'
-
-    - name: Install necessary dependencies (Debian-based systems)
-      apt:
+    - name: Ensure prerequisites are installed
+      package:
         name:
-          - gnupg
-          - software-properties-common
-          - curl
+          - unzip
+          - wget
         state: present
-      when: ansible_os_family == 'Debian'
 
-    - name: Install necessary dependencies (RHEL-based systems) excluding curl
-      yum:
-        name:
-          - yum-utils
-        state: present
-      when: ansible_os_family == 'RedHat'
-
-    - name: Download HashiCorp Vault (latest version)
+    - name: Download Vault binary
       get_url:
-        url: "https://releases.hashicorp.com/vault/1.12.0/vault_1.12.0_linux_amd64.zip"
+        url: "https://releases.hashicorp.com/vault/1.11.0/vault_1.11.0_linux_amd64.zip"
         dest: /tmp/vault.zip
 
-    - name: Unzip HashiCorp Vault
+    - name: Unzip Vault binary
       unarchive:
         src: /tmp/vault.zip
-        dest: /usr/local/bin
+        dest: /usr/local/bin/
         remote_src: yes
 
-    - name: Set ownership and permissions for Vault binary
+    - name: Set Vault binary permissions
       file:
         path: /usr/local/bin/vault
-        owner: root
-        group: root
         mode: '0755'
-
-    - name: Create Vault user and group
-      user:
-        name: vault
-        state: present
-        system: yes
-        shell: /sbin/nologin
 
     - name: Create Vault configuration directory
       file:
         path: /etc/vault.d
         state: directory
-        owner: vault
-        group: vault
-        mode: '0755'
-
-    - name: Create Vault data directory
-      file:
-        path: /var/lib/vault/data
-        state: directory
-        owner: vault
-        group: vault
-        mode: '0755'
 
     - name: Create Vault configuration file
       copy:
         dest: /etc/vault.d/vault.hcl
         content: |
           storage "file" {
-            path = "/var/lib/vault/data"
+            path = "/opt/vault/data"
           }
           listener "tcp" {
-            address     = "0.0.0.0:8200"
+            address = "0.0.0.0:8200"
             tls_disable = 1
           }
           ui = true
 
-    - name: Set ownership and permissions for Vault configuration file
-      file:
-        path: /etc/vault.d/vault.hcl
-        owner: vault
-        group: vault
-        mode: '0644'
-
-    - name: Create a systemd service file for Vault
+    - name: Create Vault systemd service file
       copy:
         dest: /etc/systemd/system/vault.service
         content: |
           [Unit]
-          Description=HashiCorp Vault - A tool for managing secrets
+          Description=HashiCorp Vault
           Documentation=https://www.vaultproject.io/docs/
           After=network-online.target
+          Wants=network-online.target
 
           [Service]
           User=vault
@@ -108,17 +63,34 @@
           KillSignal=SIGINT
           Restart=on-failure
           LimitNOFILE=8192
-          LimitMEMLOCK=infinity
+          TimeoutSec=30
 
           [Install]
           WantedBy=multi-user.target
 
-    - name: Reload systemd to pick up new Vault service
-      systemd:
-        daemon_reload: yes
+    - name: Create Vault user and group
+      user:
+        name: vault
+        state: present
+
+    - name: Create Vault data directory
+      file:
+        path: /opt/vault/data
+        state: directory
+        owner: vault
+        group: vault
+        mode: '0700'
 
     - name: Enable and start Vault service
       systemd:
         name: vault
-        enabled: yes
         state: started
+        enabled: yes
+
+    - name: Check Vault service status
+      command: systemctl status vault
+      register: vault_status
+
+    - name: Debug Vault service status
+      debug:
+        msg: "Vault service status: {{ vault_status.stdout }}"
