@@ -1,24 +1,26 @@
 ---
-- name: Ensure Java is installed using YUM
-  hosts: localhost  # Replace with your target hosts or groups
-  become: yes       # Ensure the playbook runs with elevated privileges
+- name: Install Java (Amazon Corretto) on AWS EC2
+  hosts: localhost
+  become: yes
 
   tasks:
-    - name: Check if Java is already installed
-      shell: java -version
-      register: java_check
-      ignore_errors: yes
-
-    - name: Debug Java version if already installed
-      debug:
-        msg: "Java is already installed: {{ java_check.stdout }}"
-      when: java_check.rc == 0
-
-    - name: Install Java using YUM
-      yum:
-        name: java
+    - name: Import the Amazon Corretto RPM GPG key
+      rpm_key:
         state: present
-      when: java_check.rc != 0
+        key: https://yum.corretto.aws/corretto.key
+
+    - name: Add Amazon Corretto yum repository
+      yum_repository:
+        name: corretto
+        description: Amazon Corretto
+        baseurl: https://yum.corretto.aws/latest/amazon-linux-2/x86_64/
+        gpgcheck: yes
+        enabled: yes
+
+    - name: Install Amazon Corretto 11
+      yum:
+        name: java-11-amazon-corretto-devel
+        state: present
 
     - name: Verify Java installation
       shell: java -version
@@ -29,9 +31,3 @@
       debug:
         msg: "Java installation verification: {{ java_install_check.stdout }}"
       when: java_install_check.rc == 0
-
-    - name: Print error if Java installation failed
-      debug:
-        msg: "Java installation failed or Java is not properly installed."
-      when: java_install_check.rc != 0
-

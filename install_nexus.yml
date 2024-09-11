@@ -1,0 +1,85 @@
+---
+- name: Setup Nexus Repository on AWS EC2 Linux
+  hosts: localhost
+  become: yes
+  vars:
+    nexus_url: "https://download.sonatype.com/nexus/3/latest-unix.tar.gz"
+    nexus_install_dir: "/opt/nexus"
+    nexus_user: "nexus"
+    nexus_group: "nexus"
+    java_package: "java-17-amazon-corretto"  # Updated to Java 17 as required by Nexus
+
+  tasks:
+    - name: Install Amazon Corretto OpenJDK 17
+      package:
+        name: "{{ java_package }}"
+        state: present
+
+    - name: Create Nexus group
+      group:
+        name: "{{ nexus_group }}"
+        state: present
+
+    - name: Create Nexus user
+      user:
+        name: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+        shell: /sbin/nologin
+        create_home: no
+        state: present
+
+    - name: Create Nexus installation directory
+      file:
+        path: "{{ nexus_install_dir }}"
+        state: directory
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+
+    - name: Download Nexus
+      get_url:
+        url: "{{ nexus_url }}"
+        dest: "/tmp/nexus-latest-unix.tar.gz"
+
+    - name: Extract Nexus
+      unarchive:
+        src: "/tmp/nexus-latest-unix.tar.gz"
+        dest: "{{ nexus_install_dir }}"
+        remote_src: yes
+
+    - name: Set permissions for Nexus
+      file:
+        path: "{{ nexus_install_dir }}"
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+        recurse: yes
+
+    - name: Create Nexus service file
+      copy:
+        dest: /etc/systemd/system/nexus.service
+        content: |
+          [Unit]
+          Description=Nexus Repository Manager
+          After=network.target
+
+          [Service]
+          Type=forking
+          User={{ nexus_user }}
+          Group={{ nexus_group }}
+          ExecStart={{ nexus_install_dir }}/nexus-*/bin/nexus start
+          ExecStop={{ nexus_install_dir }}/nexus-*/bin/nexus stop
+          Restart=always
+          LimitNOFILE=65536
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd and start Nexus
+      systemd:
+        name: nexus
+        state: started
+        enabled: yes
+
+    - name: Clean up downloaded files
+      file:
+        path: "/tmp/nexus-latest-unix.tar.gz"
+        state: absent

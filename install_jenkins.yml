@@ -1,0 +1,28 @@
+---
+- name: Install and Configure Jenkins
+  hosts: localhost  # Adjust as needed for your target hosts
+  become: yes
+
+  tasks:
+    - name: Add Jenkins repository
+      get_url:
+        url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+        dest: /etc/yum.repos.d/jenkins.repo
+
+    - name: Import Jenkins GPG key
+      rpm_key:
+        state: present
+        key: https://pkg.jenkins.io/redhat/jenkins.io.key
+
+    - name: Install Jenkins
+      yum:
+        name: jenkins
+        state: present
+        enablerepo: jenkins
+        disable_gpg_check: yes  # Disable GPG check temporarily
+
+    - name: Ensure Jenkins is started and enabled
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
