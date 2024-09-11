@@ -1,117 +1,85 @@
-- name: Set up SonarQube on AWS EC2 Linux
-  hosts: sonarqube
+---
+- name: Install and configure SonarQube
+  hosts: localhost
   become: yes
-  vars:
-    sonar_version: "10.4.1.88267" # Update this to the latest version
-    sonar_install_dir: "/opt/sonarqube"
-    sonar_user: "sonar"
-    sonar_group: "sonar"
 
   tasks:
-    - name: Update package index
+    - name: Install Java 8 (Amazon Corretto)
       yum:
-        name: '*'
-        state: latest
-
-    - name: Install required packages
-      yum:
-        name:
-          - unzip
-          - wget
+        name: "{{ item }}"
         state: present
-
-    - name: Create SonarQube group
-      group:
-        name: "{{ sonar_group }}"
-        state: present
-
-    - name: Create SonarQube user
-      user:
-        name: "{{ sonar_user }}"
-        group: "{{ sonar_group }}"
-        create_home: yes
-        state: present
-
-    - name: Download and Install OpenJDK 11
-      block:
-        - name: Download OpenJDK 11
-          get_url:
-            url: "https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.20%2B8/OpenJDK11U-jdk_x64_linux_hotspot_11.0.20_8.tar.gz"
-            dest: "/tmp/openjdk-11_linux-x64_bin.tar.gz"
-
-        - name: Extract OpenJDK 11
-          unarchive:
-            src: "/tmp/openjdk-11_linux-x64_bin.tar.gz"
-            dest: "/usr/local"
-            remote_src: yes
-
-        - name: Set JAVA_HOME and PATH
-          lineinfile:
-            path: /etc/profile.d/jdk11.sh
-            line: "{{ item }}"
-            create: yes
-          loop:
-            - "export JAVA_HOME=/usr/local/jdk-11"
-            - "export PATH=$JAVA_HOME/bin:$PATH"
-
-    - name: Create SonarQube installation directory
-      file:
-        path: "{{ sonar_install_dir }}"
-        state: directory
-        owner: "{{ sonar_user }}"
-        group: "{{ sonar_group }}"
-        mode: '0755'
+      loop:
+        - java-1.8.0-amazon-corretto
+        - java-1.8.0-amazon-corretto-devel
 
     - name: Download SonarQube
       get_url:
-        url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonar_version }}.zip"
-        dest: "/tmp/sonarqube-{{ sonar_version }}.zip"
+        url: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-7.6.zip
+        dest: /opt/sonarqube-7.6.zip
 
     - name: Unzip SonarQube
       unarchive:
-        src: "/tmp/sonarqube-{{ sonar_version }}.zip"
-        dest: "{{ sonar_install_dir }}"
+        src: /opt/sonarqube-7.6.zip
+        dest: /opt
         remote_src: yes
-        owner: "{{ sonar_user }}"
-        group: "{{ sonar_group }}"
 
-    - name: Symlink SonarQube directory
+    - name: Create sonar group
+      group:
+        name: sonar
+        state: present
+
+    - name: Create sonar user
+      user:
+        name: sonar
+        comment: "Sonar System User"
+        home: /opt/sonarqube-7.6
+        group: sonar
+        shell: /bin/bash
+        state: present
+
+    - name: Set ownership for SonarQube directory
       file:
-        src: "{{ sonar_install_dir }}/sonarqube-{{ sonar_version }}"
-        dest: "{{ sonar_install_dir }}/current"
-        state: link
+        path: /opt/sonarqube-7.6
+        owner: sonar
+        group: sonar
+        recurse: yes
 
-    - name: Create SonarQube service file
+    - name: Set permissions for SonarQube directory
+      file:
+        path: /opt/sonarqube-7.6
+        mode: '0775'
+        recurse: yes
+
+    - name: Modify sonar.sh to run as sonar user
+      lineinfile:
+        path: /opt/sonarqube-7.6/bin/linux-x86-64/sonar.sh
+        regexp: '^#RUN_AS_USER='
+        line: 'RUN_AS_USER=sonar'
+
+    - name: Create SonarQube systemd service file
       copy:
         dest: /etc/systemd/system/sonarqube.service
         content: |
           [Unit]
           Description=SonarQube service
-          After=network.target
-
+          After=syslog.target network.target
           [Service]
           Type=forking
-          User={{ sonar_user }}
-          Group={{ sonar_group }}
-          ExecStart={{ sonar_install_dir }}/current/bin/linux-x86-64/sonar.sh start
-          ExecStop={{ sonar_install_dir }}/current/bin/linux-x86-64/sonar.sh stop
+          ExecStart=/opt/sonarqube-7.6/bin/linux-x86-64/sonar.sh start
+          ExecStop=/opt/sonarqube-7.6/bin/linux-x86-64/sonar.sh stop
+          User=sonar
+          Group=sonar
           Restart=always
-
           [Install]
           WantedBy=multi-user.target
 
-    - name: Reload systemd to recognize SonarQube service
-      command: systemctl daemon-reload
-
-    - name: Start and enable SonarQube service
-      systemd:
+    - name: Start SonarQube service
+      service:
         name: sonarqube
         state: started
         enabled: yes
 
-    - name: Open firewall port 9000 (if using firewalld)
-      firewalld:
-        port: 9000/tcp
-        permanent: yes
-        state: enabled
-      ignore_errors: yes
+    - name: Create userdata completion marker
+      file:
+        path: /userdata.complete
+        state: touch
